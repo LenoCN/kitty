@@ -1,0 +1,128 @@
+import sys
+sys.path.append("C:\\Users\\liuwe\\Desktop\\kitty")
+
+import numpy as np
+import tushare as ts
+import time
+import schedule
+from kittytools.send_mail import send_mail
+from kittytools.mult_thread import mult_thread
+from kittytools.pytdx_lib import add_today_data,get_today_data
+from kittytools.mysql import *
+from research.r_lib import *
+from research.r2 import r2,trend_line_cal
+from research.r3 import r3
+from research.r4 import boll_cal, r4
+from research.r5 import r5
+from research.r6 import r6
+from research.r7 import r7
+
+
+def rtest_rt(ts_code, today_date):
+
+    fh=open('rt.log','w')
+    print(ts_code)
+    name = rename(ts_code)
+    df = read_data(name)
+    df = df[df['trade_date'] > '20220700']
+
+    if len(df[df['trade_date']==today_date]) == 0:
+        df_today = get_today_data(ts_code=ts_code, trade_date=today_date)
+        df = pd.concat([df,df_today])
+        df = df.reset_index(drop=True)
+    #print(df)
+
+    if(len(df) < 60):
+        return [ts_code, 'N']
+    #else:
+    #    print('ERROR : Exist this trade_date: %s' % today_date)
+    # 计算趋势阻挡位
+    time_period = 20
+    # 历史数据为i之前time_period-1个最高价
+    history = df['high'][-1*time_period-1:-1].to_list()
+    trend_line_l, th_l = trend_line_cal(history=history,time_period=time_period,fh=fh)
+    if th_l == []:
+        return [ts_code, 'N']
+    th = min(th_l)
+
+    # 计算当日布林线
+    time_period = 20
+    history = df['high'][-1*time_period:].to_list()
+    lower_band,upper_band =  boll_cal(history=history)
+
+    # 计算均线
+    time_period_a, time_period_b, time_period_c = 10,20,60
+    history_a = df['close'][-1 * time_period_a : ].to_list()
+    history_b = df['close'][-1 * time_period_b : ].to_list()
+    history_c = df['close'][-1 * time_period_c : ].to_list()
+    # SMA:简单移动平均(Simple Moving Average)
+    sma_a = np.mean(history_a)
+    sma_b = np.mean(history_b)
+    sma_c = np.mean(history_c)
+
+    con_1 = df.iloc[-1]['close'] > th # 突破短期下行趋势线
+    con_2 = df.iloc[-1]['high'] < upper_band # 最高价小于布林线上轨
+    con_3 = df.iloc[-1]['amount'] > 3 * 100000 # 成交额大于2亿
+    con_4 = df.iloc[-1]['close'] / df.iloc[-2]['close'] < 1.095# 不涨停
+    con_5 = sma_a > sma_c
+
+    #print(con_1, con_2, con_3, con_4, con_5)
+    
+    if con_1 and con_2 and con_3 and con_4 and con_5:
+        return [ts_code, 'Y']
+    else:
+        return [ts_code, 'N']
+        
+
+
+def job():
+    a = time.time()
+    #查询当前所有正常上市交易的股票列表
+    pro = ts.pro_api('06e94cac4f4e03d170ca18f20d2e2ba7bbe2b6f7b5c328db0167ae26')
+    stock_l = pro.stock_basic(exchange='', list_status='L',  fields='ts_code,symbol,name,area,industry,list_date, market')
+    stock_l = stock_l[stock_l['name'].str.find('ST') == -1] #去除ST
+    stock_l = stock_l[stock_l['market'].str.find('北交所') == -1] #去除北交所
+
+    num_l = [[0,999],[1000,1999],[2000,2999],[3000,3999],[4000,4999]]
+    #num_l = [[0,100]]
+    today_date = '20221017'
+
+    o_list = []
+    for num in num_l:
+        threads = []
+        for i,ts_code in enumerate(stock_l['ts_code']):
+            if i >= num[0] and i <= num[1]:
+                threads.append(mult_thread(rtest_rt,(ts_code, today_date)))
+                threads[-1].start()
+        for thread in threads:
+            thread.join()
+            o_list.append(thread.get_result())
+
+    df = pd.DataFrame(o_list,columns=['ts_code', 'status'])
+    df = df[df['status'] == 'Y']
+    df.to_csv('rtest_rt.lg')
+    stock_str = ''
+    for i in range(len(df)):
+        stock_str = stock_str + df.iloc[i]['ts_code'] + '\n'
+    #print(stock_str)
+    send_mail(stock_str)
+    b = time.time()
+    print(b-a)
+
+if __name__ == '__main__':
+    #print(rtest_rt(ts_code='002246.SZ',today_date='20221017'))
+    #sys.exit()
+
+    job()
+    sys.exit()
+
+    schedule.every().day.at("09:45").do(job)
+    schedule.every().day.at("09:45").do(job)
+    schedule.every().day.at("11:15").do(job)
+    schedule.every().day.at("13:22").do(job)
+    schedule.every().day.at("14:40").do(job)
+    schedule.every().day.at("14:45").do(job)
+    schedule.every().day.at("14:50").do(job)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)

@@ -1,0 +1,89 @@
+import sys
+sys.path.append("C:\\Users\\liuwe\\Desktop\\kitty")
+import tushare as ts
+import time
+
+from kittytools.pytdx_lib import add_today_data
+from kittytools.mysql import *
+from research.r_lib import *
+from research.r2 import r2
+from research.r3 import r3
+from research.r4 import r4
+from research.r5 import r5
+from research.r6 import r6
+from research.r7 import r7
+
+
+if __name__ == '__main__':
+    #df = read_data('000002dotsz')
+    #df = df.loc[df['trade_date'] > '20220906']
+    #df = df.reset_index(drop=True)
+    #r2(df=df, time_period=time_period, o_list=o_list)
+    a = time.time()
+
+    #查询当前所有正常上市交易的股票列表
+    pro = ts.pro_api('06e94cac4f4e03d170ca18f20d2e2ba7bbe2b6f7b5c328db0167ae26')
+    data = pro.stock_basic(exchange='', list_status='L',  fields='ts_code,symbol,name,area,industry,list_date, market')
+    data = data[data['name'].str.find('ST') == -1]
+    data = data[data['market'].str.find('北交所') == -1]
+    #sys.exit()
+
+    num = 100
+    o_list = []
+    id_list = []
+    id_list_1 = []
+    id_list_2 = []
+    id_list_3 = []
+    id_list_4 = []
+    id_list_5 = []
+    for ts_code in data['ts_code']:
+        name = rename(ts_code)
+        #if('002431' not in name):
+        #    continue
+        print(ts_code)
+        try:
+            if False:
+                df = read_data(name)
+            else:
+                df = add_today_data(ts_code,'20221014')
+        except:
+            continue
+        df = df.loc[df['trade_date'] > '20220800']
+        df = df.reset_index(drop=True)
+        id_list_2 = r2(df, time_period=20) # 突破短期下行趋势线
+        #id_list_3 = r3(df, time_period=20, slope=1)# 20日日线向上
+        #id_list_3 = list(set(r3(df, time_period=120, slope=1)) & set(r3(df, time_period=60, slope=1))) # 120日与60日日线向上
+        id_list_4 = r4(df, time_period=20) # 最高价小于布林线上轨
+        id_list_5 = r5(df)                 # 成交额大于1亿
+                                           # 不涨停
+        #id_list_6 = r6(df, time_period=20) # 收盘价小于布林线下轨
+        id_list_7 = r7(df, time_period_a=10, time_period_b=20, time_period_c=30) # 均线多头排列 a>b>c
+
+        #id_list = list(set(id_list_2) & set(id_list_5)  & set(id_list_6) & set(id_list_7))
+        id_list = list(set(id_list_2) & set(id_list_4) & set(id_list_5) & set(id_list_7))
+
+        for i in id_list:
+            try:
+                next_close = df['close'][i+1]
+                next_high = 0
+                for j in range(1,4):
+                    if df['high'][i+j] > next_high:
+                        next_high = df['high'][i+j]
+                next_low   = df['low'][i+1]
+            except:
+                o_list.append([df['ts_code'][i], df['trade_date'][i],0,0])
+                continue
+            o_list.append([df['ts_code'][i], df['trade_date'][i],next_high/df['close'][i], next_low/df['close'][i]])
+        num=num-1
+        #if num ==0:
+        #    break
+
+
+    da = pd.DataFrame(o_list,columns=['ts_code', 'trade_date', 'increase', 'decrease'])
+    da = da.sort_values(by='trade_date', ascending=True)
+    inc_dist(da)
+    #write_data(da, 'test1011')
+    #da = da.loc[da['increase'] < 1.03]
+    da.to_csv('tmprtest')
+    b = time.time()
+    print(b-a)
