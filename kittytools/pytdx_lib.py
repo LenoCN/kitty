@@ -1,9 +1,8 @@
 import sys
 from datetime import datetime, timedelta, date
-sys.path.append("C:\\Users\\liuwe\\Desktop\\kitty")
 
 import pandas as pd
-from kittytools.mult_thread import mult_thread
+from mult_thread import mult_thread
 import tushare as ts
 from pytdx.hq import TdxHq_API
 from pytdx.params import TDXParams
